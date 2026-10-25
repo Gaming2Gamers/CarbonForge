@@ -1,0 +1,143 @@
+# ==============================================================================
+# 🔨 Gaming2Gamers (G2G) — CarbonForge • ∞ Meraki
+# Upstream Google Carbon Toolchain & C++20 Lowering Build Configuration
+# File: BUILD.bazel
+# ==============================================================================
+
+load("@carbon//bazel:rules.bzl", "carbon_binary", "carbon_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# ------------------------------------------------------------------------------
+# Track A: Native Google Carbon Language Targets (@carbon//bazel:rules.bzl)
+# ------------------------------------------------------------------------------
+
+# 1. SO(3) Quaternion Math, SLERP, Geodesic Deadband, Bimanual Constraints
+carbon_library(
+    name = "kimodo_blend",
+    srcs = ["modules/kinematics/kimodo_blend.carbon"],
+)
+
+# 2. C3 Cubic Soft-Spring Boundary Barrier & 72-Byte C ABI Structs
+carbon_library(
+    name = "kimodo_barrier",
+    srcs = ["modules/kinematics/kimodo_barrier.carbon"],
+)
+
+# 3. Hephaestus v2.0 RK4 SE(3) C4 Quintic Phase-Space Barrier & 8-Wide Batch SLERP
+carbon_library(
+    name = "hephaestus_rk4_se3",
+    srcs = ["modules/kinematics/hephaestus_rk4_se3.carbon"],
+    deps = [
+        ":kimodo_blend",
+    ],
+)
+
+# 4. Analytical Signed Distance Fields (SDF) & 64-Primitive Humanoid Synthesizer
+carbon_library(
+    name = "skin_colliders",
+    srcs = ["modules/physics_sdf/skin_colliders.carbon"],
+)
+
+# 5. Arrow Lake-S VEX AVX-VNNI (VPDPBUSD) & AVX2 INT8 Vector Acceleration Cortex
+carbon_library(
+    name = "avx_vnni_cortex",
+    srcs = ["modules/ai_cortex/avx_vnni_cortex.carbon"],
+)
+
+# 6. Zero-Copy Memory-Mapped (mmap) GGUF v2/v3 Tensor Engine
+carbon_library(
+    name = "gguf_mmap",
+    srcs = ["modules/ai_cortex/gguf_mmap.carbon"],
+)
+
+# Combined Multi-Domain CarbonForge Library
+carbon_library(
+    name = "carbon_forge_lib",
+    deps = [
+        ":avx_vnni_cortex",
+        ":gguf_mmap",
+        ":hephaestus_rk4_se3",
+        ":kimodo_barrier",
+        ":kimodo_blend",
+        ":skin_colliders",
+    ],
+)
+
+# ------------------------------------------------------------------------------
+# Track B: Zero-Overhead C++20 Lowering Bridge Targets (@rules_cc)
+# ------------------------------------------------------------------------------
+
+cc_library(
+    name = "carbon_interop_headers",
+    hdrs = glob([
+        "include/*.h",
+        "include/*.hpp",
+    ]),
+    includes = ["include"],
+)
+
+cc_library(
+    name = "kimodo_carbon_shared",
+    srcs = ["src/kimodo_carbon.cpp"],
+    copts = select({
+        "@platforms//os:windows": [
+            "/O2",
+            "/arch:AVX2",
+            "/std:c++20",
+            "/EHsc",
+            "/DKIMODO_BUILD_SHARED",
+        ],
+        "//conditions:default": [
+            "-O3",
+            "-mavx2",
+            "-mfma",
+            "-std=c++20",
+            "-fPIC",
+            "-DKIMODO_BUILD_SHARED",
+        ],
+    }),
+    deps = [":carbon_interop_headers"],
+)
+
+cc_library(
+    name = "avx_vnni_carbon_shared",
+    srcs = ["src/avx_vnni_carbon.cpp"],
+    copts = select({
+        "@platforms//os:windows": [
+            "/O2",
+            "/arch:AVX2",
+            "/std:c++20",
+            "/EHsc",
+        ],
+        "//conditions:default": [
+            "-O3",
+            "-mavx2",
+            "-mfma",
+            "-std=c++20",
+            "-fPIC",
+        ],
+    }),
+    deps = [":carbon_interop_headers"],
+)
+
+cc_binary(
+    name = "carbon_forge_bench",
+    srcs = ["benchmarks/carbon_forge_bench.cpp"],
+    copts = select({
+        "@platforms//os:windows": [
+            "/O2",
+            "/arch:AVX2",
+            "/std:c++20",
+            "/EHsc",
+        ],
+        "//conditions:default": [
+            "-O3",
+            "-mavx2",
+            "-mfma",
+            "-std=c++20",
+        ],
+    }),
+    deps = [":carbon_interop_headers"],
+)

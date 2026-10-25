@@ -1,0 +1,13 @@
+# ==============================================================================
+# 🔨 Gaming2Gamers (G2G) — CarbonForge • ∞ Meraki
+# Bazel Bzlmod Configuration
+# File: MODULE.bazel
+# ==============================================================================
+
+module(
+    name = "g2g_carbon_forge",
+    version = "1.4.0",
+)
+
+bazel_dep(name = "platforms", version = "0.0.10")
+bazel_dep(name = "rules_cc", version = "0.0.17")

@@ -1,0 +1,25 @@
+# ==============================================================================
+# 🔨 Gaming2Gamers (G2G) — CarbonForge • ∞ Meraki
+# Git Ignore Configuration
+# ==============================================================================
+
+# Intermediate C/C++ compilation artifacts
+*.obj
+*.o
+*.exp
+*.lib
+*.pdb
+*.ilk
+*.idb
+
+# Synthetic runtime test fixtures
+build/*.gguf
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Bazel symlinks
+bazel-*
