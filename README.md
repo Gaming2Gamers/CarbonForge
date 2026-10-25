@@ -176,18 +176,25 @@ inline float step_rk4_quintic_barrier(
 import ctypes
 import numpy as np
 
-# Load the compiled CarbonForge shared library (.dll / .so)
-forge = ctypes.CDLL("./build/carbon_forge.dll")
+# Load the compiled CarbonForge AVX-VNNI shared library (.dll / .so)
+forge = ctypes.CDLL("./build/avx_vnni_carbon.dll")
 
-# Allocate 64-byte aligned int8 / uint8 vectors for 4096-D AVX-VNNI dot product
-q_int8 = np.ones(4096, dtype=np.int8)
-k_uint8 = np.ones(4096, dtype=np.uint8)
+# Allocate 64-byte aligned int8 vectors for 4096-D AVX-VNNI dot product
+db_mat = np.ones((1, 4096), dtype=np.int8)
+q_vec = np.ones(4096, dtype=np.int8)
+scales = np.ones(1, dtype=np.float32)
+out_scores = np.zeros(1, dtype=np.float32)
 
-dot_score = forge.cf_avx_vnni_dot_4096(
-    q_int8.ctypes.data_as(ctypes.POINTER(ctypes.c_int8)),
-    k_uint8.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+forge.avx_vnni_dot_product_int8(
+    db_mat.ctypes.data_as(ctypes.POINTER(ctypes.c_int8)),
+    q_vec.ctypes.data_as(ctypes.POINTER(ctypes.c_int8)),
+    scales.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+    ctypes.c_float(1.0),
+    ctypes.c_int(1),
+    ctypes.c_int(4096),
+    out_scores.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
 )
-print(f"4096-D AVX-VNNI Dot Product Score: {dot_score} (42.06 ns)")
+print(f"4096-D AVX-VNNI Dot Product Score: {out_scores[0]:.1f} (42.06 ns)")
 ```
 
 ---
