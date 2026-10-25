@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 
 #if defined(_WIN32)
   #ifndef WIN32_LEAN_AND_MEAN

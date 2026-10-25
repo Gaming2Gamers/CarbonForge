@@ -26,7 +26,6 @@ Usage:
 
 import argparse
 import ctypes
-from ctypes import wintypes
 import math
 import os
 from pathlib import Path
@@ -454,6 +453,7 @@ def free_library(dll: Optional[ctypes.CDLL]) -> bool:
     """Safely unloads a shared library handle on Windows to release file locks."""
     if IS_WINDOWS and dll is not None and hasattr(dll, "_handle") and dll._handle:
         try:
+            from ctypes import wintypes
             kernel32 = ctypes.windll.kernel32
             kernel32.FreeLibrary.argtypes = [wintypes.HMODULE]
             kernel32.FreeLibrary.restype = wintypes.BOOL

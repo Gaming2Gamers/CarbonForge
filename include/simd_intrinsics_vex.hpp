@@ -13,7 +13,12 @@
  */
 
 #include <immintrin.h>
-#include <intrin.h>
+#if defined(_MSC_VER)
+  #include <intrin.h>
+#elif defined(__GNUC__) || defined(__clang__)
+  #include <cpuid.h>
+  #include <x86intrin.h>
+#endif
 #include <cstdint>
 #include <cstdlib>
 #include <cmath>
@@ -31,8 +36,22 @@ static inline int32_t HorizontalSum256(__m256i v) noexcept {
     return _mm_cvtsi128_si32(sum128);
 }
 
+// Cross-platform XGETBV reader (Windows MSVC + Linux GCC/Clang)
+static inline uint64_t ReadXcr0() noexcept {
+#if defined(_MSC_VER)
+    return static_cast<uint64_t>(_xgetbv(0));
+#elif defined(__GNUC__) || defined(__clang__)
+    uint32_t eax = 0, edx = 0;
+    __asm__ __volatile__("xgetbv" : "=a"(eax), "=d"(edx) : "c"(0));
+    return (static_cast<uint64_t>(edx) << 32) | eax;
+#else
+    return 0;
+#endif
+}
+
 // Probes CPUID Leaf 1, Leaf 7.0, Leaf 7.1, and XCR0 for AVX2 and AVX-VNNI support
 static inline int IsVnniSupported() noexcept {
+#if defined(_MSC_VER)
     int cpuInfo[4] = {0};
 
     __cpuid(cpuInfo, 1);
@@ -42,8 +61,7 @@ static inline int IsVnniSupported() noexcept {
         return 0;
     }
 
-    unsigned __int64 xcr0 = _xgetbv(0);
-    if ((xcr0 & 6) != 6) {
+    if ((ReadXcr0() & 6ULL) != 6ULL) {
         return 0;
     }
 
@@ -57,6 +75,103 @@ static inline int IsVnniSupported() noexcept {
     int avx_vnni = (cpuInfo[0] & (1 << 4)) != 0;
 
     return (avx2 && avx_vnni) ? 1 : 0;
+#elif defined(__GNUC__) || defined(__clang__)
+    uint32_t eax = 0, ebx = 0, ecx = 0, edx = 0;
+    if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) {
+        return 0;
+    }
+    int osxsave = (ecx & (1U << 27)) != 0;
+    int avx = (ecx & (1U << 28)) != 0;
+    if (!osxsave || !avx) {
+        return 0;
+    }
+
+    if ((ReadXcr0() & 6ULL) != 6ULL) {
+        return 0;
+    }
+
+    __cpuid_count(7, 0, eax, ebx, ecx, edx);
+    int avx2 = (ebx & (1U << 5)) != 0;
+    if (!avx2) {
+        return 0;
+    }
+
+    __cpuid_count(7, 1, eax, ebx, ecx, edx);
+    int avx_vnni = (eax & (1U << 4)) != 0;
+
+    return (avx2 && avx_vnni) ? 1 : 0;
+#else
+    return 0;
+#endif
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((target("avx2,avxvnni")))
+#endif
+static inline void ComputeRawDotProductsVnniKernel(
+    const int8_t* db_matrix,
+    const uint8_t* query_u8,
+    int num_vectors,
+    int dim,
+    int32_t* out_raw
+) noexcept {
+    const __m256i ones_byte = _mm256_set1_epi8(1);
+
+    for (int i = 0; i < num_vectors; ++i) {
+        const int8_t* row = db_matrix + static_cast<size_t>(i) * dim;
+        __m256i dot0 = _mm256_setzero_si256();
+        __m256i dot1 = _mm256_setzero_si256();
+        __m256i dot2 = _mm256_setzero_si256();
+        __m256i dot3 = _mm256_setzero_si256();
+
+        __m256i sum0 = _mm256_setzero_si256();
+        __m256i sum1 = _mm256_setzero_si256();
+        __m256i sum2 = _mm256_setzero_si256();
+        __m256i sum3 = _mm256_setzero_si256();
+
+        int j = 0;
+        for (; j + 127 < dim; j += 128) {
+            __m256i q0 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_u8 + j));
+            __m256i r0 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + j));
+            dot0 = _mm256_dpbusd_avx_epi32(dot0, q0, r0);
+            sum0 = _mm256_dpbusd_avx_epi32(sum0, ones_byte, r0);
+
+            __m256i q1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_u8 + j + 32));
+            __m256i r1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + j + 32));
+            dot1 = _mm256_dpbusd_avx_epi32(dot1, q1, r1);
+            sum1 = _mm256_dpbusd_avx_epi32(sum1, ones_byte, r1);
+
+            __m256i q2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_u8 + j + 64));
+            __m256i r2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + j + 64));
+            dot2 = _mm256_dpbusd_avx_epi32(dot2, q2, r2);
+            sum2 = _mm256_dpbusd_avx_epi32(sum2, ones_byte, r2);
+
+            __m256i q3 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_u8 + j + 96));
+            __m256i r3 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + j + 96));
+            dot3 = _mm256_dpbusd_avx_epi32(dot3, q3, r3);
+            sum3 = _mm256_dpbusd_avx_epi32(sum3, ones_byte, r3);
+        }
+
+        for (; j + 31 < dim; j += 32) {
+            __m256i q0 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_u8 + j));
+            __m256i r0 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + j));
+            dot0 = _mm256_dpbusd_avx_epi32(dot0, q0, r0);
+            sum0 = _mm256_dpbusd_avx_epi32(sum0, ones_byte, r0);
+        }
+
+        __m256i dot_tot = _mm256_add_epi32(_mm256_add_epi32(dot0, dot1), _mm256_add_epi32(dot2, dot3));
+        __m256i sum_tot = _mm256_add_epi32(_mm256_add_epi32(sum0, sum1), _mm256_add_epi32(sum2, sum3));
+
+        int32_t raw_dot = HorizontalSum256(dot_tot);
+        int32_t raw_sum = HorizontalSum256(sum_tot);
+
+        for (; j < dim; ++j) {
+            raw_dot += static_cast<int32_t>(query_u8[j]) * static_cast<int32_t>(row[j]);
+            raw_sum += static_cast<int32_t>(row[j]);
+        }
+
+        out_raw[i] = raw_dot - 128 * raw_sum;
+    }
 }
 
 // Computes raw integer dot products between signed query and database rows
@@ -82,63 +197,7 @@ static inline void ComputeRawDotProductsInt8(
             query_u8[j] = static_cast<uint8_t>(query_vec[j] + 128);
         }
 
-        const __m256i ones_byte = _mm256_set1_epi8(1);
-
-        for (int i = 0; i < num_vectors; ++i) {
-            const int8_t* row = db_matrix + static_cast<size_t>(i) * dim;
-            __m256i dot0 = _mm256_setzero_si256();
-            __m256i dot1 = _mm256_setzero_si256();
-            __m256i dot2 = _mm256_setzero_si256();
-            __m256i dot3 = _mm256_setzero_si256();
-
-            __m256i sum0 = _mm256_setzero_si256();
-            __m256i sum1 = _mm256_setzero_si256();
-            __m256i sum2 = _mm256_setzero_si256();
-            __m256i sum3 = _mm256_setzero_si256();
-
-            int j = 0;
-            for (; j + 127 < dim; j += 128) {
-                __m256i q0 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_u8 + j));
-                __m256i r0 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + j));
-                dot0 = _mm256_dpbusd_avx_epi32(dot0, q0, r0);
-                sum0 = _mm256_dpbusd_avx_epi32(sum0, ones_byte, r0);
-
-                __m256i q1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_u8 + j + 32));
-                __m256i r1 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + j + 32));
-                dot1 = _mm256_dpbusd_avx_epi32(dot1, q1, r1);
-                sum1 = _mm256_dpbusd_avx_epi32(sum1, ones_byte, r1);
-
-                __m256i q2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_u8 + j + 64));
-                __m256i r2 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + j + 64));
-                dot2 = _mm256_dpbusd_avx_epi32(dot2, q2, r2);
-                sum2 = _mm256_dpbusd_avx_epi32(sum2, ones_byte, r2);
-
-                __m256i q3 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_u8 + j + 96));
-                __m256i r3 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + j + 96));
-                dot3 = _mm256_dpbusd_avx_epi32(dot3, q3, r3);
-                sum3 = _mm256_dpbusd_avx_epi32(sum3, ones_byte, r3);
-            }
-
-            for (; j + 31 < dim; j += 32) {
-                __m256i q0 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_u8 + j));
-                __m256i r0 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(row + j));
-                dot0 = _mm256_dpbusd_avx_epi32(dot0, q0, r0);
-                sum0 = _mm256_dpbusd_avx_epi32(sum0, ones_byte, r0);
-            }
-
-            __m256i dot_tot = _mm256_add_epi32(_mm256_add_epi32(dot0, dot1), _mm256_add_epi32(dot2, dot3));
-            __m256i sum_tot = _mm256_add_epi32(_mm256_add_epi32(sum0, sum1), _mm256_add_epi32(sum2, sum3));
-
-            int32_t raw_dot = HorizontalSum256(dot_tot);
-            int32_t raw_sum = HorizontalSum256(sum_tot);
-
-            for (; j < dim; ++j) {
-                raw_dot += static_cast<int32_t>(query_u8[j]) * static_cast<int32_t>(row[j]);
-                raw_sum += static_cast<int32_t>(row[j]);
-            }
-
-            out_raw[i] = raw_dot - 128 * raw_sum;
-        }
+        ComputeRawDotProductsVnniKernel(db_matrix, query_u8, num_vectors, dim, out_raw);
 
         if (query_u8 != q_u8_stack) {
             std::free(query_u8);
