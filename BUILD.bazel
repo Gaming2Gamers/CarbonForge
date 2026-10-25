@@ -58,6 +58,18 @@ carbon_library(
     deps = [":carbon_interop_headers"],
 )
 
+# 7. OpenArm Bimanual Hardware Safety Guard (1kHz Closed-Loop Math)
+carbon_library(
+    name = "openarm_bimanual_guard",
+    srcs = ["examples/openarm_bimanual_guard/openarm_bimanual_guard.carbon"],
+    deps = [
+        ":carbon_interop_headers",
+        ":hephaestus_rk4_se3",
+        ":kimodo_barrier",
+        ":skin_colliders",
+    ],
+)
+
 # Combined Multi-Domain CarbonForge Library
 carbon_library(
     name = "carbon_forge_lib",
@@ -67,6 +79,7 @@ carbon_library(
         ":hephaestus_rk4_se3",
         ":kimodo_barrier",
         ":kimodo_blend",
+        ":openarm_bimanual_guard",
         ":skin_colliders",
     ],
 )
@@ -127,6 +140,33 @@ cc_library(
             "-mxsave",
             "-std=c++20",
             "-fPIC",
+        ],
+    }),
+    deps = [":carbon_interop_headers"],
+)
+
+cc_library(
+    name = "openarm_bimanual_guard_shared",
+    srcs = ["examples/openarm_bimanual_guard/openarm_bimanual_guard.cpp"],
+    hdrs = ["examples/openarm_bimanual_guard/openarm_bimanual_guard.hpp"],
+    includes = ["examples/openarm_bimanual_guard", "include"],
+    copts = select({
+        "@platforms//os:windows": [
+            "/O2",
+            "/arch:AVX2",
+            "/std:c++20",
+            "/EHsc",
+            "/DOPENARM_BUILD_SHARED",
+        ],
+        "//conditions:default": [
+            "-O3",
+            "-mavx2",
+            "-mfma",
+            "-mavxvnni",
+            "-mxsave",
+            "-std=c++20",
+            "-fPIC",
+            "-DOPENARM_BUILD_SHARED",
         ],
     }),
     deps = [":carbon_interop_headers"],

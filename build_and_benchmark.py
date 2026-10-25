@@ -57,6 +57,7 @@ EXE_EXT = ".exe" if IS_WINDOWS else ""
 
 KIMODO_CARBON_LIB = BUILD_DIR / f"kimodo_carbon{SHARED_EXT}"
 AVX_VNNI_CARBON_LIB = BUILD_DIR / f"avx_vnni_carbon{SHARED_EXT}"
+OPENARM_GUARD_LIB = BUILD_DIR / f"openarm_bimanual_guard{SHARED_EXT}"
 BENCH_EXECUTABLE = BUILD_DIR / f"carbon_forge_bench{EXE_EXT}"
 SYNTHETIC_GGUF_PATH = BUILD_DIR / "synthetic_model_v3.gguf"
 
@@ -68,6 +69,7 @@ CARBON_FILES = [
     "modules/ai_cortex/avx_vnni_cortex.carbon",
     "modules/ai_cortex/gguf_mmap.carbon",
     "templates/cpp_python_bridge/module_template.carbon",
+    "examples/openarm_bimanual_guard/openarm_bimanual_guard.carbon",
 ]
 
 TOLERANCE_STRICT = 1.0e-7
@@ -207,7 +209,7 @@ class CarbonParser:
 
     def _parse_functions(self) -> None:
         fn_pattern = re.compile(r"^\s*fn\s+([A-Za-z0-9_]+)(?:\[.*?\])?\s*\((.*?)\)(?:\s*->\s*([^{;]+))?")
-        c_abi_prefixes = ("kimodo_", "hephaestus_", "avx_vnni_", "carbon_forge_")
+        c_abi_prefixes = ("kimodo_", "hephaestus_", "avx_vnni_", "carbon_forge_", "openarm_")
 
         for line_num, line in enumerate(self.lines, 1):
             m = fn_pattern.match(line)
@@ -396,6 +398,12 @@ def run_stage_2() -> bool:
                 "flags": f"{base_flags} /LD",
             },
             {
+                "name": OPENARM_GUARD_LIB.name,
+                "src": "examples/openarm_bimanual_guard/openarm_bimanual_guard.cpp",
+                "out": f"build/{OPENARM_GUARD_LIB.name}",
+                "flags": f'{base_flags} /LD /DOPENARM_BUILD_SHARED /I "examples/openarm_bimanual_guard"',
+            },
+            {
                 "name": BENCH_EXECUTABLE.name,
                 "src": "benchmarks/carbon_forge_bench.cpp",
                 "out": f"build/{BENCH_EXECUTABLE.name}",
@@ -435,6 +443,7 @@ def run_stage_2() -> bool:
         targets_posix = [
             (KIMODO_CARBON_LIB.name, ["src/kimodo_carbon.cpp"], ["-shared", "-fPIC", "-DKIMODO_BUILD_SHARED"], KIMODO_CARBON_LIB),
             (AVX_VNNI_CARBON_LIB.name, ["src/avx_vnni_carbon.cpp"], ["-shared", "-fPIC"], AVX_VNNI_CARBON_LIB),
+            (OPENARM_GUARD_LIB.name, ["examples/openarm_bimanual_guard/openarm_bimanual_guard.cpp"], ["-shared", "-fPIC", "-DOPENARM_BUILD_SHARED", "-Iexamples/openarm_bimanual_guard"], OPENARM_GUARD_LIB),
             (BENCH_EXECUTABLE.name, ["benchmarks/carbon_forge_bench.cpp"], [], BENCH_EXECUTABLE),
         ]
         for name, srcs, extra, out_path in targets_posix:
@@ -602,12 +611,14 @@ def run_stage_3() -> bool:
 
     c_k: Optional[ctypes.CDLL] = None
     c_v: Optional[ctypes.CDLL] = None
+    c_openarm: Optional[ctypes.CDLL] = None
     all_passed = True
     summary_rows: List[Tuple[str, bool, str]] = []
 
     try:
         c_k = ctypes.CDLL(str(KIMODO_CARBON_LIB))
         c_v = ctypes.CDLL(str(AVX_VNNI_CARBON_LIB))
+        c_openarm = ctypes.CDLL(str(OPENARM_GUARD_LIB))
 
         # Domain 1: Unit Quaternion SLERP
         c_k.kimodo_slerp.argtypes = [
@@ -861,15 +872,89 @@ def run_stage_3() -> bool:
             ("Benchmark 2 (AVX2 BatchSlerpSoA8)", b2_ok, f"{speedup:.2f}x speedup, max err = {cheb_err:.6f}")
         )
 
+        # Benchmark 3: OpenArm 1kHz Bimanual Closed-Loop Safety Guard
+        c_openarm.openarm_bimanual_guard_init.restype = ctypes.c_void_p
+        c_openarm.openarm_bimanual_guard_init.argtypes = []
+        c_openarm.openarm_bimanual_guard_destroy.restype = None
+        c_openarm.openarm_bimanual_guard_destroy.argtypes = [ctypes.c_void_p]
+        c_openarm.openarm_bimanual_guard_step_1khz.restype = ctypes.c_int32
+        c_openarm.openarm_bimanual_guard_step_1khz.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.c_float,
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+        ]
+
+        guard_ctx = c_openarm.openarm_bimanual_guard_init()
+        c_f16 = ctypes.c_float * 16
+        q_m = c_f16()
+        v_m = c_f16()
+        t_c = c_f16()
+        q_nxt = c_f16()
+        v_nxt = c_f16()
+        t_sfe = c_f16()
+        clr = ctypes.c_float(0.0)
+
+        # Initial pose: arms neutral
+        q_m[0] = -0.30; q_m[1] = 0.20; q_m[3] = 0.80; q_m[7] = 0.20
+        q_m[8] = 0.30; q_m[9] = 0.20; q_m[11] = 0.80; q_m[15] = 0.20
+
+        limits = [
+            (-1.5708, 1.5708), (-1.0000, 1.5708), (-1.5708, 1.5708), (0.0000, 2.2000),
+            (-1.5708, 1.5708), (-0.7854, 0.7854), (-0.4189, 0.4189), (0.0000, 0.4500),
+            (-1.5708, 1.5708), (-1.5708, 1.0000), (-1.5708, 1.5708), (0.0000, 2.2000),
+            (-1.5708, 1.5708), (-0.7854, 2.6180), (-0.4189, 0.4189), (0.0000, 0.4500)
+        ]
+
+        max_os = 0.0
+        min_clr = float("inf")
+        for step in range(1000):
+            if step < 500:
+                # Collision assault: drive both arms inward toward center
+                t_c[0] = 35.0; t_c[1] = 15.0; t_c[3] = 10.0; t_c[5] = 10.0; t_c[6] = 8.0
+                t_c[8] = -35.0; t_c[9] = 15.0; t_c[11] = 10.0; t_c[13] = 10.0; t_c[14] = 8.0
+            else:
+                # Joint limit assault: drive toward limits
+                for j in range(16):
+                    t_c[j] = 35.0 if (step // 125) % 2 == 0 else -35.0
+                t_c[13] = 12.0; t_c[6] = 12.0; t_c[14] = -12.0; t_c[7] = -8.0; t_c[15] = 8.0
+
+            c_openarm.openarm_bimanual_guard_step_1khz(
+                guard_ctx, q_m, v_m, t_c, 0.001, q_nxt, v_nxt, t_sfe, ctypes.byref(clr)
+            )
+            min_clr = min(min_clr, clr.value)
+            for j in range(16):
+                q_val = q_nxt[j]
+                mn, mx = limits[j]
+                if q_val > mx:
+                    max_os = max(max_os, q_val - mx)
+                elif q_val < mn:
+                    max_os = max(max_os, mn - q_val)
+                q_m[j] = q_nxt[j]
+                v_m[j] = v_nxt[j]
+
+        c_openarm.openarm_bimanual_guard_destroy(guard_ctx)
+        b3_ok = (max_os <= 1.0e-5) and (min_clr > 0.0)
+        all_passed = all_passed and b3_ok
+        summary_rows.append(
+            ("Benchmark 3 (OpenArm 1kHz Bimanual Guard)", b3_ok, f"overshoot = +{max_os:.5f} rad, min clearance = {min_clr:.4f} m")
+        )
+
     finally:
         free_library(c_k)
         free_library(c_v)
+        free_library(c_openarm)
 
     for label, ok, detail in summary_rows:
         print(f"  [{'PASS' if ok else 'FAIL'}] {label:<38} | {detail}")
 
     if all_passed:
-        print("\n🎉 STAGE 3 PASSED: All 7 numerical domains and 2 benchmarks validated cleanly!")
+        print("\n🎉 STAGE 3 PASSED: All 7 numerical domains and 3 benchmarks validated cleanly!")
     else:
         print("\n❌ STAGE 3 FAILED: One or more verification checks failed.")
 
