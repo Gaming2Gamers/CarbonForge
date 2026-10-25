@@ -13,7 +13,7 @@
 
 package CarbonForge api;
 
-import Cpp;
+import Cpp library "hephaestus_rk4_se3.hpp";
 
 // ----------------------------------------------------------------------------
 // Physics & Mathematical Calibration Constants

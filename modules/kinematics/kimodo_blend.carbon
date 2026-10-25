@@ -11,7 +11,7 @@
 
 package CarbonForge api;
 
-import Cpp;
+import Cpp library "carbon_interop.hpp";
 
 // ----------------------------------------------------------------------------
 // Mathematical Constants

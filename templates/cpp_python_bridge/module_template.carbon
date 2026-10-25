@@ -9,7 +9,7 @@
 
 package CarbonForge api;
 
-import Cpp;
+import Cpp library "module_template.hpp";
 
 // ----------------------------------------------------------------------------
 // CustomComputeKernel: Starter Carbon Class with Zero-Overhead C++20 Interop

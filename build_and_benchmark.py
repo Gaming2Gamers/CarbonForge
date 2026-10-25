@@ -171,18 +171,29 @@ class CarbonParser:
 
     def _parse_package_and_imports(self) -> None:
         pkg_pattern = re.compile(
-            r"^\s*package\s+([A-Za-z0-9_]+)(?:\s+library\s+\"([A-Za-z0-9_]+)\")?\s+(api|impl)\s*;"
+            r"^\s*package\s+([A-Za-z0-9_]+)(?:\s+library\s+\"([A-Za-z0-9_.\-/]+)\")?\s+(api|impl)\s*;"
         )
-        import_pattern = re.compile(r"^\s*import\s+([A-Za-z0-9_]+)(?:\s+library\s+\"([A-Za-z0-9_]+)\")?\s*;")
+        import_pattern = re.compile(r"^\s*import\s+([A-Za-z0-9_]+)(?:\s+library\s+\"([A-Za-z0-9_.\-/]+)\")?\s*;")
+        preproc_pattern = re.compile(r"^\s*#\s*(if|ifdef|ifndef|else|elif|endif|define|include|pragma)\b")
 
-        for line in self.lines:
+        for line_num, line in enumerate(self.lines, 1):
+            if preproc_pattern.match(line):
+                self.errors.append(
+                    f"C preprocessor directive '{line.strip()}' at line {line_num} is illegal in Google Carbon"
+                )
             pkg_match = pkg_pattern.match(line)
             if pkg_match:
                 self.package_name = pkg_match.group(1)
                 self.package_type = pkg_match.group(3)
             imp_match = import_pattern.match(line)
             if imp_match:
-                self.imports.append(imp_match.group(1))
+                imp_pkg = imp_match.group(1)
+                imp_lib = imp_match.group(2)
+                if imp_pkg == "Cpp" and not imp_lib:
+                    self.errors.append(
+                        f"Bare 'import Cpp;' at line {line_num} must specify 'import Cpp library \"<header>\";'"
+                    )
+                self.imports.append(f"{imp_pkg}:{imp_lib}" if imp_lib else imp_pkg)
 
         if self.package_name != "CarbonForge":
             self.errors.append(f"Expected 'package CarbonForge api;', got '{self.package_name}'")
@@ -275,7 +286,17 @@ def run_stage_1() -> bool:
     if carbon_cli:
         print(f"🔎 Detected upstream LLVM Carbon toolchain ({carbon_cli}); running 'carbon compile --phase=check'...")
         for rel_path in CARBON_FILES:
-            subprocess.run([carbon_cli, "compile", "--phase=check", str(ROOT_DIR / rel_path)], check=False)
+            res_c = subprocess.run(
+                [carbon_cli, "compile", "--phase=check", str(ROOT_DIR / rel_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if res_c.returncode != 0:
+                print(f"❌ carbon compile failed for {rel_path}:\n{res_c.stderr}")
+                all_valid = False
 
     if all_valid:
         print("\n🎉 STAGE 1 PASSED: All CarbonForge modules strictly conform to Carbon language grammar!")

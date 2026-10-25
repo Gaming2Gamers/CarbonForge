@@ -34,6 +34,14 @@
 
 namespace g2g::carbon_forge::gguf {
 
+constexpr bool IsWindowsHost() noexcept {
+#if defined(_WIN32)
+    return true;
+#else
+    return false;
+#endif
+}
+
 constexpr uint32_t GgufMagic = 0x46554747; // "GGUF" in little-endian
 constexpr uint32_t GgufDefaultAlignment = 32;
 

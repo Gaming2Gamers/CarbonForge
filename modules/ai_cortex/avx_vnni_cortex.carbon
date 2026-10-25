@@ -15,7 +15,7 @@
 
 package CarbonForge api;
 
-import Cpp;
+import Cpp library "simd_intrinsics_vex.hpp";
 
 // ----------------------------------------------------------------------------
 // SimdCortexEngine: Core Vector Acceleration Routines

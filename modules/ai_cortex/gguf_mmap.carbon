@@ -11,7 +11,7 @@
 
 package CarbonForge api;
 
-import Cpp;
+import Cpp library "gguf_mmap_win32.hpp";
 
 // ----------------------------------------------------------------------------
 // GGUF Binary Format Constants
@@ -406,11 +406,11 @@ class GgufParser {
 }
 
 // ----------------------------------------------------------------------------
-// Virtual Memory Mapping & Unmapping (Win32 & POSIX)
+// Virtual Memory Mapping & Unmapping (Win32 & POSIX via Cpp Lowering Bridge)
 // ----------------------------------------------------------------------------
 class MemoryMappingBridge {
   fn OpenMappedFile(file_path: i8*, ctx: GgufContext*) -> bool {
-    #if defined(_WIN32)
+    if (Cpp.IsWindowsHost()) {
       let req_len: i32 = Cpp.MultiByteToWideChar(65001, 0, file_path, -1, 0 as i16*, 0);
       if (req_len <= 0) { return false; }
 
@@ -456,7 +456,7 @@ class MemoryMappingBridge {
         return false;
       }
       (*ctx).mapped_ptr = ptr as u8*;
-    #else
+    } else {
       let fd: i32 = Cpp.open(file_path, 0);
       if (fd < 0) { return false; }
       (*ctx).posix_fd = fd;
@@ -479,7 +479,7 @@ class MemoryMappingBridge {
         return false;
       }
       (*ctx).mapped_ptr = ptr as u8*;
-    #endif
+    }
 
     return GgufParser.ParseHeader(ctx);
   }
@@ -487,7 +487,7 @@ class MemoryMappingBridge {
   fn CloseMappedFile(ctx: GgufContext*) {
     if (ctx == (0 as GgufContext*)) { return; }
 
-    #if defined(_WIN32)
+    if (Cpp.IsWindowsHost()) {
       if ((*ctx).mapped_ptr != (0 as u8*)) {
         Cpp.UnmapViewOfFile((*ctx).mapped_ptr as i8*);
         (*ctx).mapped_ptr = 0 as u8*;
@@ -500,7 +500,7 @@ class MemoryMappingBridge {
         Cpp.CloseHandle((*ctx).win_file_handle);
         (*ctx).win_file_handle = -1 as i8*;
       }
-    #else
+    } else {
       if ((*ctx).mapped_ptr != (0 as u8*)) {
         Cpp.munmap((*ctx).mapped_ptr as i8*, (*ctx).file_size);
         (*ctx).mapped_ptr = 0 as u8*;
@@ -509,7 +509,7 @@ class MemoryMappingBridge {
         Cpp.close((*ctx).posix_fd);
         (*ctx).posix_fd = -1;
       }
-    #endif
+    }
 
     if ((*ctx).tensors != (0 as TensorDescriptor*)) {
       Cpp.free((*ctx).tensors as i8*);

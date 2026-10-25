@@ -12,7 +12,7 @@
 
 package CarbonForge api;
 
-import Cpp;
+import Cpp library "skin_colliders.hpp";
 
 // ----------------------------------------------------------------------------
 // Mathematical Constants

@@ -17,12 +17,14 @@ package(default_visibility = ["//visibility:public"])
 carbon_library(
     name = "kimodo_blend",
     srcs = ["modules/kinematics/kimodo_blend.carbon"],
+    deps = [":carbon_interop_headers"],
 )
 
 # 2. C3 Cubic Soft-Spring Boundary Barrier & 72-Byte C ABI Structs
 carbon_library(
     name = "kimodo_barrier",
     srcs = ["modules/kinematics/kimodo_barrier.carbon"],
+    deps = [":carbon_interop_headers"],
 )
 
 # 3. Hephaestus v2.0 RK4 SE(3) C4 Quintic Phase-Space Barrier & 8-Wide Batch SLERP
@@ -30,6 +32,7 @@ carbon_library(
     name = "hephaestus_rk4_se3",
     srcs = ["modules/kinematics/hephaestus_rk4_se3.carbon"],
     deps = [
+        ":carbon_interop_headers",
         ":kimodo_blend",
     ],
 )
@@ -38,18 +41,21 @@ carbon_library(
 carbon_library(
     name = "skin_colliders",
     srcs = ["modules/physics_sdf/skin_colliders.carbon"],
+    deps = [":carbon_interop_headers"],
 )
 
 # 5. Arrow Lake-S VEX AVX-VNNI (VPDPBUSD) & AVX2 INT8 Vector Acceleration Cortex
 carbon_library(
     name = "avx_vnni_cortex",
     srcs = ["modules/ai_cortex/avx_vnni_cortex.carbon"],
+    deps = [":carbon_interop_headers"],
 )
 
 # 6. Zero-Copy Memory-Mapped (mmap) GGUF v2/v3 Tensor Engine
 carbon_library(
     name = "gguf_mmap",
     srcs = ["modules/ai_cortex/gguf_mmap.carbon"],
+    deps = [":carbon_interop_headers"],
 )
 
 # Combined Multi-Domain CarbonForge Library
