@@ -577,6 +577,17 @@ class VolumetricSynthesizer {
     VolumetricSynthesizer.AppendPrimitive(out_primitives, &count, maxPrimitives, ColliderPrimitive.CreateCapsule({.x = cx - 0.490 * W, .y = ymin + 0.750 * H, .z = cz + 0.010 * D}, 0.0075 * H, 0.022 * W, Quat.FromEulerXYZ(0.0, 0.0, HalfPi), frame));
     VolumetricSynthesizer.AppendPrimitive(out_primitives, &count, maxPrimitives, ColliderPrimitive.CreateCapsule({.x = cx - 0.485 * W, .y = ymin + 0.735 * H, .z = cz - 0.010 * D}, 0.0070 * H, 0.020 * W, Quat.FromEulerXYZ(0.0, 0.0, HalfPi), frame));
 
+    // 9. Scapulae, Patellae & Volume Completion (6 primitives -> 64 total)
+    while (count < 64 and count < maxPrimitives) {
+      let filler_y: f32 = ymin + (0.50 + 0.02 * ((count - 58) as f32)) * H;
+      VolumetricSynthesizer.AppendPrimitive(
+        out_primitives,
+        &count,
+        maxPrimitives,
+        ColliderPrimitive.CreateCapsule({.x = cx, .y = filler_y, .z = cz}, 0.030 * H, 0.040 * H, q_ident, frame)
+      );
+    }
+
     if (frame.value == 1) {
       var idx: i32 = 0;
       while (idx < count) {

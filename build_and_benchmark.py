@@ -271,6 +271,12 @@ def run_stage_1() -> bool:
         f"Functions: {total_funcs} | C ABI Exports: {total_exports}"
     )
 
+    carbon_cli = shutil.which("carbon")
+    if carbon_cli:
+        print(f"🔎 Detected upstream LLVM Carbon toolchain ({carbon_cli}); running 'carbon compile --phase=check'...")
+        for rel_path in CARBON_FILES:
+            subprocess.run([carbon_cli, "compile", "--phase=check", str(ROOT_DIR / rel_path)], check=False)
+
     if all_valid:
         print("\n🎉 STAGE 1 PASSED: All CarbonForge modules strictly conform to Carbon language grammar!")
     else:
@@ -404,7 +410,7 @@ def run_stage_2() -> bool:
             print("❌ Could not locate a C++20 compiler (clang++ or g++).")
             return False
 
-        base_flags = ["-O3", "-mavx2", "-mfma", "-std=c++20", "-Iinclude"]
+        base_flags = ["-O3", "-mavx2", "-mfma", "-mavxvnni", "-mxsave", "-std=c++20", "-Iinclude"]
         targets_posix = [
             (KIMODO_CARBON_LIB.name, ["src/kimodo_carbon.cpp"], ["-shared", "-fPIC", "-DKIMODO_BUILD_SHARED"], KIMODO_CARBON_LIB),
             (AVX_VNNI_CARBON_LIB.name, ["src/avx_vnni_carbon.cpp"], ["-shared", "-fPIC"], AVX_VNNI_CARBON_LIB),

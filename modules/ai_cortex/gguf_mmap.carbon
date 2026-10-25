@@ -461,9 +461,15 @@ class MemoryMappingBridge {
       if (fd < 0) { return false; }
       (*ctx).posix_fd = fd;
 
-      var sb: [u64; 18];
-      Cpp.fstat(fd, &sb[0] as i8*);
-      let size: u64 = sb[6];
+      // Architecture-independent POSIX file size query via lseek(SEEK_END)
+      let end_off: i64 = Cpp.lseek(fd, 0, 2);
+      Cpp.lseek(fd, 0, 0);
+      if (end_off < 16) {
+        Cpp.close(fd);
+        (*ctx).posix_fd = -1;
+        return false;
+      }
+      let size: u64 = end_off as u64;
       (*ctx).file_size = size;
 
       let ptr: i8* = Cpp.mmap(0 as i8*, size, 1, 1, fd, 0);
